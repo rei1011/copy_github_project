@@ -6,7 +6,7 @@
 set -e
 
 # 設定変数
-SOURCE_OWNER="rei1011"
+SOURCE_OWNER="copy-project"
 SOURCE_PROJECT_ID="1"
 
 # 色付きの出力用
@@ -40,20 +40,6 @@ check_requirements() {
         log_error "GITHUB_TOKEN環境変数が設定されていません"
         echo "GitHubの個人アクセストークンを設定してください:"
         echo "export GITHUB_TOKEN=your_token_here"
-        exit 1
-    fi
-    
-    if [ -z "$TARGET_OWNER" ]; then
-        log_error "TARGET_OWNER環境変数が設定されていません"
-        echo "コピー先のGitHubユーザー名またはOrganization名を設定してください:"
-        echo "export TARGET_OWNER=your_username_here"
-        exit 1
-    fi
-    
-    if [ -z "$TARGET_REPO" ]; then
-        log_error "TARGET_REPO環境変数が設定されていません"
-        echo "コピー先のリポジトリ名を設定してください:"
-        echo "export TARGET_REPO=your_repo_name_here"
         exit 1
     fi
     
@@ -118,10 +104,10 @@ github_graphql() {
 get_project_info() {
     log_info "プロジェクト情報を取得しています..."
     
-    # GraphQLクエリでユーザーのプロジェクトV2を取得
+    # GraphQLクエリでユーザーまたはOrganizationのプロジェクトV2を取得
     local query='
     query($login: String!, $projectNumber: Int!) {
-        user(login: $login) {
+        organization(login: $login) {
             projectV2(number: $projectNumber) {
                 id
                 title
@@ -222,7 +208,7 @@ get_project_info() {
     fi
     
     # プロジェクト情報を抽出
-    local project_data=$(echo "$response" | jq '.data.user.projectV2')
+    local project_data=$(echo "$response" | jq '.data.organization.projectV2')
     
     if [ "$project_data" = "null" ] || [ -z "$project_data" ]; then
         log_error "プロジェクト番号 $SOURCE_PROJECT_ID が見つかりません"
@@ -248,7 +234,7 @@ get_project_columns() {
     
     # プロジェクトV2にはカラムの概念がないため、フィールド情報をログ出力
     if [ -f "debug_projects_v2.json" ]; then
-        local fields=$(jq -r '.data.user.projectV2.fields.nodes[] | "フィールド: \(.name) (タイプ: \(.dataType))"' debug_projects_v2.json 2>/dev/null || echo "フィールド情報の取得に失敗")
+        local fields=$(jq -r '.data.organization.projectV2.fields.nodes[] | "フィールド: \(.name) (タイプ: \(.dataType))"' debug_projects_v2.json 2>/dev/null || echo "フィールド情報の取得に失敗")
         log_info "プロジェクトフィールド:"
         echo "$fields"
     fi
@@ -336,43 +322,10 @@ get_related_issues() {
     cp issues.json issues_debug.json
 }
 
-# 新しいリポジトリを作成（存在しない場合）
-create_target_repo() {
-    log_info "コピー先リポジトリを確認しています..."
-    
-    local repo_check=$(github_api "repos/$TARGET_OWNER/$TARGET_REPO" 2>/dev/null || echo "null")
-    
-    if [ "$repo_check" = "null" ] || echo "$repo_check" | jq -e '.message == "Not Found"' > /dev/null; then
-        log_info "新しいリポジトリを作成しています: $TARGET_OWNER/$TARGET_REPO"
-        
-        local repo_data=$(jq -n \
-            --arg name "$TARGET_REPO" \
-            '{
-                name: $name,
-                description: $description,
-                private: false,
-                has_issues: true,
-                has_projects: true,
-                has_wiki: false
-            }')
-        
-        local create_response=$(github_api "user/repos" "POST" "$repo_data")
-        
-        if echo "$create_response" | jq -e '.name' > /dev/null; then
-            log_success "リポジトリを作成しました: $TARGET_OWNER/$TARGET_REPO"
-        else
-            log_error "リポジトリの作成に失敗しました"
-            echo "$create_response" | jq .
-            exit 1
-        fi
-    else
-        log_info "リポジトリが既に存在します: $TARGET_OWNER/$TARGET_REPO"
-    fi
-}
 
-# issueをコピー
+# issueをコピー（元のリポジトリに作成）
 copy_issues() {
-    log_info "issueをコピーしています..."
+    log_info "issueを元のリポジトリにコピーしています..."
     
     local issue_count=$(jq '. | length' issues.json)
     
@@ -389,8 +342,16 @@ copy_issues() {
         local title=$(echo "$issue" | jq -r '.title')
         local body=$(echo "$issue" | jq -r '.body // ""')
         local labels=$(echo "$issue" | jq -r '.labels // [] | map(.name) | join(",")')
+        local repo_owner=$(echo "$issue" | jq -r '.repository.owner.login // ""')
+        local repo_name=$(echo "$issue" | jq -r '.repository.name // ""')
         
-        log_info "Issue \"$title\" をコピー中..."
+        # リポジトリ情報が取得できない場合はスキップ
+        if [ -z "$repo_owner" ] || [ -z "$repo_name" ] || [ "$repo_owner" = "null" ] || [ "$repo_name" = "null" ]; then
+            log_warning "Issue \"$title\" のリポジトリ情報が不完全です。スキップします。"
+            continue
+        fi
+        
+        log_info "Issue \"$title\" を $repo_owner/$repo_name にコピー中..."
         
         # ラベルの配列を作成
         local labels_array="[]"
@@ -399,7 +360,10 @@ copy_issues() {
         fi
         
         # 本文に元のプロジェクトへの参照を追加
-        local new_body="$body"
+        local new_body="$body
+
+---
+*このissueは [プロジェクト $SOURCE_OWNER#$SOURCE_PROJECT_ID](https://github.com/orgs/$SOURCE_OWNER/projects/$SOURCE_PROJECT_ID) からコピーされました*"
         
         local issue_data=$(jq -n \
             --arg title "$title" \
@@ -411,16 +375,17 @@ copy_issues() {
                 labels: $labels
             }')
         
-        local create_response=$(github_api "repos/$TARGET_OWNER/$TARGET_REPO/issues" "POST" "$issue_data")
+        # 元のリポジトリにissueを作成
+        local create_response=$(github_api "repos/$repo_owner/$repo_name/issues" "POST" "$issue_data")
         
         if echo "$create_response" | jq -e '.number' > /dev/null; then
             local new_issue_number=$(echo "$create_response" | jq -r '.number')
             local new_issue_id=$(echo "$create_response" | jq -r '.node_id')
-            log_success "Issue #$new_issue_number を作成しました: $title"
+            log_success "Issue #$new_issue_number を $repo_owner/$repo_name に作成しました: $title"
             created_issues+=("$new_issue_id")
             ((copied_count++))
         else
-            log_error "Issue \"$title\" の作成に失敗しました"
+            log_error "Issue \"$title\" の $repo_owner/$repo_name への作成に失敗しました"
             echo "$create_response" | jq .
         fi
     done < <(jq -c '.[]' issues.json)
@@ -428,23 +393,23 @@ copy_issues() {
     # 作成されたissueのIDを保存
     printf '%s\n' "${created_issues[@]}" > created_issues_ids.txt
     
-    log_success "$copied_count 個のissueをコピーしました"
+    log_success "$copied_count 個のissueを元のリポジトリにコピーしました"
 }
 
 # プロジェクトV2を作成（GraphQL使用）
 create_target_project() {
-    log_info "新しいユーザーレベルプロジェクトV2を作成しています..."
+    log_info "新しいOrganizationレベルプロジェクトV2を作成しています..."
     
-    # ユーザーIDを取得
-    local user_info=$(github_api "user")
-    local user_id=$(echo "$user_info" | jq -r '.node_id')
+    # OrganizationのIDを取得
+    local org_info=$(github_api "orgs/$SOURCE_OWNER")
+    local org_id=$(echo "$org_info" | jq -r '.node_id')
     
-    if [ "$user_id" = "null" ] || [ -z "$user_id" ]; then
-        log_error "ユーザーIDの取得に失敗しました"
+    if [ "$org_id" = "null" ] || [ -z "$org_id" ]; then
+        log_error "Organization ID の取得に失敗しました"
         exit 1
     fi
     
-    # ユーザーレベルプロジェクト用のGraphQLミューテーション
+    # Organizationレベルプロジェクト用のGraphQLミューテーション
     local mutation='
     mutation($ownerId: ID!, $title: String!) {
         createProjectV2(input: {
@@ -461,8 +426,8 @@ create_target_project() {
     }'
     
     local variables=$(jq -n \
-        --arg ownerId "$user_id" \
-        --arg title "$PROJECT_NAME (コピー)" \
+        --arg ownerId "$org_id" \
+        --arg title "$PROJECT_NAME copy" \
         '{
             ownerId: $ownerId,
             title: $title
@@ -561,14 +526,13 @@ main() {
     get_project_info
     get_project_columns
     get_related_issues
-    create_target_repo
     copy_issues
     create_target_project
     create_project_columns
     cleanup
     
     log_success "プロジェクトのコピーが完了しました!"
-    log_info "コピー先: https://github.com/$TARGET_OWNER/$TARGET_REPO/projects"
+    log_info "コピー先: https://github.com/orgs/$SOURCE_OWNER/projects"
 }
 
 # スクリプト実行

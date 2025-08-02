@@ -9,8 +9,9 @@ echo
 
 echo "1. 環境変数の設定例:"
 echo "export GITHUB_TOKEN=\"ghp_your_token_here\""
-echo "export TARGET_OWNER=\"your_username\""
-echo "export TARGET_REPO=\"copied_project\""
+echo
+echo "注意: TARGET_OWNERとTARGET_REPOは不要になりました"
+echo "issueは元のリポジトリに作成され、プロジェクトは元のorganizationに作成されます"
 echo
 
 echo "2. スクリプト実行:"
@@ -20,8 +21,6 @@ echo
 echo "3. 設定確認:"
 echo "環境変数が正しく設定されているか確認:"
 echo "echo \$GITHUB_TOKEN"
-echo "echo \$TARGET_OWNER"
-echo "echo \$TARGET_REPO"
 echo
 
 echo "4. jqのインストール確認:"

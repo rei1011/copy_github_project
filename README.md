@@ -43,13 +43,9 @@
 ```bash
 # GitHubの個人アクセストークン
 export GITHUB_TOKEN="your_github_token_here"
-
-# コピー先のGitHubユーザー名またはOrganization名
-export TARGET_OWNER="your_username_or_org"
-
-# コピー先のリポジトリ名
-export TARGET_REPO="copied_project_repo"
 ```
+
+**注意**: 以前のバージョンでは`TARGET_OWNER`と`TARGET_REPO`の設定が必要でしたが、現在のバージョンでは不要です。issueは元のリポジトリに作成され、プロジェクトは元のorganizationに作成されます。
 
 ### 2. スクリプトの実行
 
@@ -77,8 +73,8 @@ SOURCE_PROJECT_ID="1"
 3. **カラム・カード取得** - プロジェクトの構造とカード情報を取得
 4. **関連issue取得** - プロジェクトカードからリンクされたissueを特定・取得
 5. **コピー先リポジトリ作成** - 必要に応じて新しいリポジトリを作成
-6. **issue移行** - 取得したissueを新しいリポジトリにコピー
-7. **プロジェクト作成** - 新しいリポジトリにプロジェクトを作成
+6. **issue移行** - 取得したissueを**元のリポジトリ**にコピー（コピー元と同じリポジトリに作成）
+7. **プロジェクト作成** - 新しいプロジェクトを作成
 8. **カラム再現** - 元のプロジェクトのカラム構造を再現
 
 ## 注意事項
