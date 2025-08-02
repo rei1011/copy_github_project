@@ -43,7 +43,6 @@ check_requirements() {
         exit 1
     fi
     
-    # 必要なコマンドの確認
     if ! command -v curl &> /dev/null; then
         log_error "curlコマンドが見つかりません"
         exit 1
@@ -55,7 +54,7 @@ check_requirements() {
     fi
 }
 
-# GitHub API呼び出し関数（新しいProjects API用）
+# GitHub APIを呼び出すための関数
 github_api() {
     local endpoint="$1"
     local method="${2:-GET}"
@@ -76,7 +75,7 @@ github_api() {
     curl "${curl_args[@]}" "https://api.github.com/$endpoint"
 }
 
-# GraphQL API呼び出し関数（新しいProjects用）
+# GraphQL APIを呼び出すための関数
 github_graphql() {
     local query="$1"
     local variables="$2"
@@ -100,11 +99,11 @@ github_graphql() {
         "https://api.github.com/graphql"
 }
 
-# プロジェクト情報を取得（新しいGraphQL API使用）
+# プロジェクト情報を取得
 get_project_info() {
     log_info "プロジェクト情報を取得しています..."
     
-    # GraphQLクエリでユーザーまたはOrganizationのプロジェクトV2を取得
+    # GraphQLクエリでユーザーまたはOrganizationのプロジェクトを取得
     local query='
     query($login: String!, $projectNumber: Int!) {
         organization(login: $login) {
@@ -112,31 +111,6 @@ get_project_info() {
                 id
                 title
                 shortDescription
-                url
-                number
-                fields(first: 20) {
-                    nodes {
-                        ... on ProjectV2Field {
-                            id
-                            name
-                            dataType
-                        }
-                        ... on ProjectV2IterationField {
-                            id
-                            name
-                            dataType
-                        }
-                        ... on ProjectV2SingleSelectField {
-                            id
-                            name
-                            dataType
-                            options {
-                                id
-                                name
-                            }
-                        }
-                    }
-                }
                 items(first: 100) {
                     nodes {
                         id
@@ -157,19 +131,6 @@ get_project_info() {
                                 labels(first: 10) {
                                     nodes {
                                         name
-                                    }
-                                }
-                            }
-                            ... on PullRequest {
-                                id
-                                number
-                                title
-                                body
-                                url
-                                repository {
-                                    name
-                                    owner {
-                                        login
                                     }
                                 }
                             }
@@ -196,7 +157,6 @@ get_project_info() {
     local response=$(github_graphql "$query" "$variables")
     
     # レスポンスをデバッグ出力
-    log_info "GraphQL レスポンスをデバッグ中..."
     echo "$response" | jq . > debug_projects_v2.json
     
     # エラーチェック
@@ -218,33 +178,18 @@ get_project_info() {
     
     PROJECT_NAME=$(echo "$project_data" | jq -r '.title')
     PROJECT_BODY=$(echo "$project_data" | jq -r '.shortDescription // ""')
-    PROJECT_URL=$(echo "$project_data" | jq -r '.url')
     PROJECT_ID=$(echo "$project_data" | jq -r '.id')
-    PROJECT_NUMBER=$(echo "$project_data" | jq -r '.number')
     
     # プロジェクトアイテム（Issue/PR）を保存
     echo "$project_data" | jq '.items.nodes' > project_items.json
     
-    log_success "プロジェクト情報を取得しました: $PROJECT_NAME (ID: $PROJECT_ID, Number: $PROJECT_NUMBER)"
+    log_success "プロジェクト情報を取得しました: $PROJECT_NAME (ID: $PROJECT_ID)"
 }
 
-# プロジェクトV2の構造とアイテムを取得（既にget_project_infoで実行済み）
-get_project_columns() {
-    log_info "プロジェクトV2のフィールド構造を確認しています..."
-    
-    # プロジェクトV2にはカラムの概念がないため、フィールド情報をログ出力
-    if [ -f "debug_projects_v2.json" ]; then
-        local fields=$(jq -r '.data.organization.projectV2.fields.nodes[] | "フィールド: \(.name) (タイプ: \(.dataType))"' debug_projects_v2.json 2>/dev/null || echo "フィールド情報の取得に失敗")
-        log_info "プロジェクトフィールド:"
-        echo "$fields"
-    fi
-    
-    log_success "プロジェクトV2の構造を確認しました"
-}
 
-# 関連するissueを取得（プロジェクトV2のアイテムから）
+# 関連するissueを取得
 get_related_issues() {
-    log_info "プロジェクトV2に関連するissueを取得しています..."
+    log_info "issueを取得しています..."
     
     if [ ! -f "project_items.json" ]; then
         log_error "project_items.json ファイルが見つかりません"
@@ -360,10 +305,7 @@ copy_issues() {
         fi
         
         # 本文に元のプロジェクトへの参照を追加
-        local new_body="$body
-
----
-*このissueは [プロジェクト $SOURCE_OWNER#$SOURCE_PROJECT_ID](https://github.com/orgs/$SOURCE_OWNER/projects/$SOURCE_PROJECT_ID) からコピーされました*"
+        local new_body="$body"
         
         local issue_data=$(jq -n \
             --arg title "$title" \
@@ -396,9 +338,9 @@ copy_issues() {
     log_success "$copied_count 個のissueを元のリポジトリにコピーしました"
 }
 
-# プロジェクトV2を作成（GraphQL使用）
+# 新しいプロジェクトを作成（GraphQL使用）
 create_target_project() {
-    log_info "新しいOrganizationレベルプロジェクトV2を作成しています..."
+    log_info "新しいプロジェクトを作成しています..."
     
     # OrganizationのIDを取得
     local org_info=$(github_api "orgs/$SOURCE_OWNER")
@@ -438,7 +380,7 @@ create_target_project() {
     # エラーチェック
     local errors=$(echo "$response" | jq '.errors // empty')
     if [ -n "$errors" ] && [ "$errors" != "null" ]; then
-        log_error "プロジェクトV2の作成でエラーが発生しました:"
+        log_error "プロジェクトの作成でエラーが発生しました:"
         echo "$errors" | jq .
         exit 1
     fi
@@ -446,7 +388,7 @@ create_target_project() {
     local project_data=$(echo "$response" | jq '.data.createProjectV2.projectV2')
     
     if [ "$project_data" = "null" ] || [ -z "$project_data" ]; then
-        log_error "プロジェクトV2の作成に失敗しました"
+        log_error "プロジェクトの作成に失敗しました"
         exit 1
     fi
     
@@ -454,12 +396,12 @@ create_target_project() {
     local project_url=$(echo "$project_data" | jq -r '.url')
     local project_number=$(echo "$project_data" | jq -r '.number')
     
-    log_success "プロジェクトV2を作成しました: $project_url (Number: $project_number)"
+    log_success "プロジェクトを作成しました: $project_url (Number: $project_number)"
 }
 
-# プロジェクトV2にissueを追加
+# プロジェクトにissueを追加
 create_project_columns() {
-    log_info "新しく作成したissueのみをプロジェクトV2に追加しています..."
+    log_info "新しく作成したissueのみをプロジェクトに追加しています..."
     
     if [ ! -f "created_issues_ids.txt" ]; then
         log_warning "created_issues_ids.txt が見つかりません。issueの追加をスキップします。"
@@ -471,9 +413,9 @@ create_project_columns() {
     # 作成されたissueのIDを使用してプロジェクトに追加
     while IFS= read -r issue_id; do
         if [ -n "$issue_id" ]; then
-            log_info "新しく作成されたissue (ID: $issue_id) をプロジェクトV2に追加中..."
+            log_info "新しく作成されたissue (ID: $issue_id) をプロジェクトに追加中..."
             
-            # プロジェクトV2にアイテムを追加するGraphQLミューテーション
+            # プロジェクトにアイテムを追加するGraphQLミューテーション
             local add_mutation='
             mutation($projectId: ID!, $contentId: ID!) {
                 addProjectV2ItemById(input: {
@@ -499,16 +441,16 @@ create_project_columns() {
             # エラーチェック
             local add_errors=$(echo "$add_response" | jq '.errors // empty')
             if [ -n "$add_errors" ] && [ "$add_errors" != "null" ]; then
-                log_warning "Issue (ID: $issue_id) のプロジェクトV2への追加に失敗しました:"
+                log_warning "Issue (ID: $issue_id) のプロジェクトへの追加に失敗しました:"
                 echo "$add_errors" | jq .
             else
-                log_success "Issue (ID: $issue_id) をプロジェクトV2に追加しました"
+                log_success "Issue (ID: $issue_id) をプロジェクトに追加しました"
                 ((added_count++))
             fi
         fi
     done < created_issues_ids.txt
     
-    log_success "$added_count 個の新しく作成されたissueをプロジェクトV2に追加しました"
+    log_success "$added_count 個の新しく作成されたissueをプロジェクトに追加しました"
 }
 
 # 一時ファイルをクリーンアップ
@@ -524,7 +466,6 @@ main() {
     
     check_requirements
     get_project_info
-    get_project_columns
     get_related_issues
     copy_issues
     create_target_project
