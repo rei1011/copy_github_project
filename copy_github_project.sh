@@ -472,8 +472,7 @@ main() {
     create_project_columns
     cleanup
     
-    log_success "プロジェクトのコピーが完了しました!"
-    log_info "コピー先: https://github.com/orgs/$SOURCE_OWNER/projects"
+    log_success "プロジェクトのコピーが完了しました"
 }
 
 # スクリプト実行
