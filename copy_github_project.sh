@@ -178,12 +178,11 @@ get_project_info() {
     
     PROJECT_NAME=$(echo "$project_data" | jq -r '.title')
     PROJECT_BODY=$(echo "$project_data" | jq -r '.shortDescription // ""')
-    PROJECT_ID=$(echo "$project_data" | jq -r '.id')
     
     # プロジェクトアイテム（Issue/PR）を保存
     echo "$project_data" | jq '.items.nodes' > project_items.json
     
-    log_success "プロジェクト情報を取得しました: $PROJECT_NAME (ID: $PROJECT_ID)"
+    log_success "プロジェクト情報を取得しました: $PROJECT_NAME"
 }
 
 
