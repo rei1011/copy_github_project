@@ -6,7 +6,6 @@
 set -e
 
 # 設定変数
-SOURCE_PROJECT_URL="https://github.com/users/rei1011/projects/1"
 SOURCE_OWNER="rei1011"
 SOURCE_PROJECT_ID="1"
 
@@ -34,9 +33,8 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# 設定チェック
+# 必要な変数、コマンドが利用可能であるか確認
 check_requirements() {
-    log_info "必要な設定をチェックしています..."
     
     if [ -z "$GITHUB_TOKEN" ]; then
         log_error "GITHUB_TOKEN環境変数が設定されていません"
@@ -69,8 +67,6 @@ check_requirements() {
         log_error "jqコマンドが見つかりません。インストールしてください: brew install jq"
         exit 1
     fi
-    
-    log_success "必要な設定が確認できました"
 }
 
 # GitHub API呼び出し関数（新しいProjects API用）
@@ -84,7 +80,6 @@ github_api() {
         -H "Authorization: token $GITHUB_TOKEN"
         -H "Accept: application/vnd.github+json"
         -H "X-GitHub-Api-Version: 2022-11-28"
-        -H "User-Agent: GitHub-Project-Copy-Script"
         -X "$method"
     )
     
@@ -114,7 +109,6 @@ github_graphql() {
     curl -s \
         -H "Authorization: token $GITHUB_TOKEN" \
         -H "Content-Type: application/json" \
-        -H "User-Agent: GitHub-Project-Copy-Script" \
         -X POST \
         -d "$data" \
         "https://api.github.com/graphql"
@@ -122,7 +116,7 @@ github_graphql() {
 
 # プロジェクト情報を取得（新しいGraphQL API使用）
 get_project_info() {
-    log_info "プロジェクト情報を取得しています（新しいProjects V2 API使用）..."
+    log_info "プロジェクト情報を取得しています..."
     
     # GraphQLクエリでユーザーのプロジェクトV2を取得
     local query='
@@ -353,7 +347,6 @@ create_target_repo() {
         
         local repo_data=$(jq -n \
             --arg name "$TARGET_REPO" \
-            --arg description "Copied from $SOURCE_PROJECT_URL" \
             '{
                 name: $name,
                 description: $description,
@@ -563,7 +556,6 @@ cleanup() {
 # メイン処理
 main() {
     log_info "GitHubプロジェクトコピーを開始します"
-    log_info "ソース: $SOURCE_PROJECT_URL"
     
     check_requirements
     get_project_info
