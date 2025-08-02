@@ -1,0 +1,583 @@
+#!/bin/bash
+
+# GitHubプロジェクトコピースクリプト
+# 使用方法: ./copy_github_project.sh
+
+set -e
+
+# 設定変数
+SOURCE_PROJECT_URL="https://github.com/users/rei1011/projects/1"
+SOURCE_OWNER="rei1011"
+SOURCE_PROJECT_ID="1"
+
+# 色付きの出力用
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# ログ関数
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# 設定チェック
+check_requirements() {
+    log_info "必要な設定をチェックしています..."
+    
+    if [ -z "$GITHUB_TOKEN" ]; then
+        log_error "GITHUB_TOKEN環境変数が設定されていません"
+        echo "GitHubの個人アクセストークンを設定してください:"
+        echo "export GITHUB_TOKEN=your_token_here"
+        exit 1
+    fi
+    
+    if [ -z "$TARGET_OWNER" ]; then
+        log_error "TARGET_OWNER環境変数が設定されていません"
+        echo "コピー先のGitHubユーザー名またはOrganization名を設定してください:"
+        echo "export TARGET_OWNER=your_username_here"
+        exit 1
+    fi
+    
+    if [ -z "$TARGET_REPO" ]; then
+        log_error "TARGET_REPO環境変数が設定されていません"
+        echo "コピー先のリポジトリ名を設定してください:"
+        echo "export TARGET_REPO=your_repo_name_here"
+        exit 1
+    fi
+    
+    # 必要なコマンドの確認
+    if ! command -v curl &> /dev/null; then
+        log_error "curlコマンドが見つかりません"
+        exit 1
+    fi
+    
+    if ! command -v jq &> /dev/null; then
+        log_error "jqコマンドが見つかりません。インストールしてください: brew install jq"
+        exit 1
+    fi
+    
+    log_success "必要な設定が確認できました"
+}
+
+# GitHub API呼び出し関数（新しいProjects API用）
+github_api() {
+    local endpoint="$1"
+    local method="${2:-GET}"
+    local data="${3:-}"
+    
+    local curl_args=(
+        -s
+        -H "Authorization: token $GITHUB_TOKEN"
+        -H "Accept: application/vnd.github+json"
+        -H "X-GitHub-Api-Version: 2022-11-28"
+        -H "User-Agent: GitHub-Project-Copy-Script"
+        -X "$method"
+    )
+    
+    if [ -n "$data" ]; then
+        curl_args+=(-H "Content-Type: application/json" -d "$data")
+    fi
+    
+    curl "${curl_args[@]}" "https://api.github.com/$endpoint"
+}
+
+# GraphQL API呼び出し関数（新しいProjects用）
+github_graphql() {
+    local query="$1"
+    local variables="$2"
+    
+    # クエリの改行と余分なスペースを削除
+    local clean_query=$(echo "$query" | tr -d '\n' | sed 's/  */ /g' | sed 's/^ *//;s/ *$//')
+    
+    local data=$(jq -n \
+        --arg query "$clean_query" \
+        --arg variables "$variables" \
+        '{
+            query: $query,
+            variables: ($variables | fromjson)
+        }')
+    
+    curl -s \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Content-Type: application/json" \
+        -H "User-Agent: GitHub-Project-Copy-Script" \
+        -X POST \
+        -d "$data" \
+        "https://api.github.com/graphql"
+}
+
+# プロジェクト情報を取得（新しいGraphQL API使用）
+get_project_info() {
+    log_info "プロジェクト情報を取得しています（新しいProjects V2 API使用）..."
+    
+    # GraphQLクエリでユーザーのプロジェクトV2を取得
+    local query='
+    query($login: String!, $projectNumber: Int!) {
+        user(login: $login) {
+            projectV2(number: $projectNumber) {
+                id
+                title
+                shortDescription
+                url
+                number
+                fields(first: 20) {
+                    nodes {
+                        ... on ProjectV2Field {
+                            id
+                            name
+                            dataType
+                        }
+                        ... on ProjectV2IterationField {
+                            id
+                            name
+                            dataType
+                        }
+                        ... on ProjectV2SingleSelectField {
+                            id
+                            name
+                            dataType
+                            options {
+                                id
+                                name
+                            }
+                        }
+                    }
+                }
+                items(first: 100) {
+                    nodes {
+                        id
+                        content {
+                            __typename
+                            ... on Issue {
+                                id
+                                number
+                                title
+                                body
+                                url
+                                repository {
+                                    name
+                                    owner {
+                                        login
+                                    }
+                                }
+                                labels(first: 10) {
+                                    nodes {
+                                        name
+                                    }
+                                }
+                            }
+                            ... on PullRequest {
+                                id
+                                number
+                                title
+                                body
+                                url
+                                repository {
+                                    name
+                                    owner {
+                                        login
+                                    }
+                                }
+                            }
+                            ... on DraftIssue {
+                                id
+                                title
+                                body
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }'
+    
+    local variables=$(jq -n \
+        --arg login "$SOURCE_OWNER" \
+        --arg projectNumber "$SOURCE_PROJECT_ID" \
+        '{
+            login: $login,
+            projectNumber: ($projectNumber | tonumber)
+        }')
+    
+    local response=$(github_graphql "$query" "$variables")
+    
+    # レスポンスをデバッグ出力
+    log_info "GraphQL レスポンスをデバッグ中..."
+    echo "$response" | jq . > debug_projects_v2.json
+    
+    # エラーチェック
+    local errors=$(echo "$response" | jq '.errors // empty')
+    if [ -n "$errors" ] && [ "$errors" != "null" ]; then
+        log_error "GraphQLクエリでエラーが発生しました:"
+        echo "$errors" | jq .
+        exit 1
+    fi
+    
+    # プロジェクト情報を抽出
+    local project_data=$(echo "$response" | jq '.data.user.projectV2')
+    
+    if [ "$project_data" = "null" ] || [ -z "$project_data" ]; then
+        log_error "プロジェクト番号 $SOURCE_PROJECT_ID が見つかりません"
+        log_info "プロジェクトが存在するか、アクセス権限があるか確認してください"
+        exit 1
+    fi
+    
+    PROJECT_NAME=$(echo "$project_data" | jq -r '.title')
+    PROJECT_BODY=$(echo "$project_data" | jq -r '.shortDescription // ""')
+    PROJECT_URL=$(echo "$project_data" | jq -r '.url')
+    PROJECT_ID=$(echo "$project_data" | jq -r '.id')
+    PROJECT_NUMBER=$(echo "$project_data" | jq -r '.number')
+    
+    # プロジェクトアイテム（Issue/PR）を保存
+    echo "$project_data" | jq '.items.nodes' > project_items.json
+    
+    log_success "プロジェクト情報を取得しました: $PROJECT_NAME (ID: $PROJECT_ID, Number: $PROJECT_NUMBER)"
+}
+
+# プロジェクトV2の構造とアイテムを取得（既にget_project_infoで実行済み）
+get_project_columns() {
+    log_info "プロジェクトV2のフィールド構造を確認しています..."
+    
+    # プロジェクトV2にはカラムの概念がないため、フィールド情報をログ出力
+    if [ -f "debug_projects_v2.json" ]; then
+        local fields=$(jq -r '.data.user.projectV2.fields.nodes[] | "フィールド: \(.name) (タイプ: \(.dataType))"' debug_projects_v2.json 2>/dev/null || echo "フィールド情報の取得に失敗")
+        log_info "プロジェクトフィールド:"
+        echo "$fields"
+    fi
+    
+    log_success "プロジェクトV2の構造を確認しました"
+}
+
+# 関連するissueを取得（プロジェクトV2のアイテムから）
+get_related_issues() {
+    log_info "プロジェクトV2に関連するissueを取得しています..."
+    
+    if [ ! -f "project_items.json" ]; then
+        log_error "project_items.json ファイルが見つかりません"
+        exit 1
+    fi
+    
+    # デバッグ: プロジェクトアイテムの詳細を確認
+    log_info "プロジェクトアイテムの詳細をデバッグ中..."
+    local total_items=$(jq '. | length' project_items.json)
+    log_info "取得したアイテム総数: $total_items"
+    
+    # 各アイテムのタイプを確認
+    jq -r '.[] | "アイテムタイプ: \(.content.__typename // "null"), ID: \(.id)"' project_items.json > items_debug.txt
+    log_info "アイテムタイプ詳細:"
+    cat items_debug.txt
+    
+    # プロジェクトアイテムからissueを抽出
+    echo "[]" > issues.json
+    
+    # より包括的な検索（__typename がない場合も考慮）
+    jq -c '.[] | select(.content != null)' project_items.json | while read -r item; do
+        local content_type=$(echo "$item" | jq -r '.content.__typename // "unknown"')
+        log_info "処理中のアイテムタイプ: $content_type"
+        
+        # Issue タイプまたは __typename が存在しない場合で number フィールドがある場合
+        if [[ "$content_type" == "Issue" ]] || [[ "$content_type" == "unknown" && $(echo "$item" | jq -e '.content.number') ]]; then
+            local issue_content=$(echo "$item" | jq '.content')
+            local title=$(echo "$issue_content" | jq -r '.title // "タイトルなし"')
+            local body=$(echo "$issue_content" | jq -r '.body // ""')
+            local url=$(echo "$issue_content" | jq -r '.url // ""')
+            local repo_name=$(echo "$issue_content" | jq -r '.repository.name // "不明"')
+            local repo_owner=$(echo "$issue_content" | jq -r '.repository.owner.login // "不明"')
+            local labels=$(echo "$issue_content" | jq -r '.labels.nodes // [] | map(.name) | join(",")')
+            local issue_number=$(echo "$issue_content" | jq -r '.number // 0')
+            
+            log_info "Issue #$issue_number を処理中: $title ($repo_owner/$repo_name)"
+            
+            # ラベルの配列を作成
+            local labels_array="[]"
+            if [ -n "$labels" ] && [ "$labels" != "" ] && [ "$labels" != "null" ]; then
+                labels_array=$(echo "$labels" | sed 's/,/","/g' | sed 's/^/["/' | sed 's/$/"]/')
+            fi
+            
+            # issue情報をJSONとして構築
+            local issue_json=$(jq -n \
+                --arg title "$title" \
+                --arg body "$body" \
+                --arg url "$url" \
+                --argjson number "$issue_number" \
+                --argjson labels "$labels_array" \
+                --arg repo_name "$repo_name" \
+                --arg repo_owner "$repo_owner" \
+                '{
+                    title: $title,
+                    body: $body,
+                    url: $url,
+                    number: $number,
+                    labels: ($labels | map({name: .})),
+                    repository: {
+                        name: $repo_name,
+                        owner: {login: $repo_owner}
+                    }
+                }')
+            
+            # 既存のissues.jsonに追加
+            local temp_file=$(mktemp)
+            jq ". += [$issue_json]" issues.json > "$temp_file" && mv "$temp_file" issues.json
+        fi
+    done
+    
+    local issue_count=$(jq '. | length' issues.json)
+    log_success "$issue_count 個のissueを取得しました"
+    
+    # デバッグ情報を保存
+    cp issues.json issues_debug.json
+}
+
+# 新しいリポジトリを作成（存在しない場合）
+create_target_repo() {
+    log_info "コピー先リポジトリを確認しています..."
+    
+    local repo_check=$(github_api "repos/$TARGET_OWNER/$TARGET_REPO" 2>/dev/null || echo "null")
+    
+    if [ "$repo_check" = "null" ] || echo "$repo_check" | jq -e '.message == "Not Found"' > /dev/null; then
+        log_info "新しいリポジトリを作成しています: $TARGET_OWNER/$TARGET_REPO"
+        
+        local repo_data=$(jq -n \
+            --arg name "$TARGET_REPO" \
+            --arg description "Copied from $SOURCE_PROJECT_URL" \
+            '{
+                name: $name,
+                description: $description,
+                private: false,
+                has_issues: true,
+                has_projects: true,
+                has_wiki: false
+            }')
+        
+        local create_response=$(github_api "user/repos" "POST" "$repo_data")
+        
+        if echo "$create_response" | jq -e '.name' > /dev/null; then
+            log_success "リポジトリを作成しました: $TARGET_OWNER/$TARGET_REPO"
+        else
+            log_error "リポジトリの作成に失敗しました"
+            echo "$create_response" | jq .
+            exit 1
+        fi
+    else
+        log_info "リポジトリが既に存在します: $TARGET_OWNER/$TARGET_REPO"
+    fi
+}
+
+# issueをコピー
+copy_issues() {
+    log_info "issueをコピーしています..."
+    
+    local issue_count=$(jq '. | length' issues.json)
+    
+    if [ "$issue_count" -eq 0 ]; then
+        log_warning "コピーするissueがありません"
+        return
+    fi
+    
+    local copied_count=0
+    local created_issues=()
+    
+    # jqの出力を配列に読み込む
+    while IFS= read -r issue; do
+        local title=$(echo "$issue" | jq -r '.title')
+        local body=$(echo "$issue" | jq -r '.body // ""')
+        local labels=$(echo "$issue" | jq -r '.labels // [] | map(.name) | join(",")')
+        
+        log_info "Issue \"$title\" をコピー中..."
+        
+        # ラベルの配列を作成
+        local labels_array="[]"
+        if [ -n "$labels" ] && [ "$labels" != "" ]; then
+            labels_array=$(echo "$labels" | sed 's/,/","/g' | sed 's/^/["/' | sed 's/$/"]/')
+        fi
+        
+        # 本文に元のプロジェクトへの参照を追加
+        local new_body="$body"
+        
+        local issue_data=$(jq -n \
+            --arg title "$title" \
+            --arg body "$new_body" \
+            --argjson labels "$labels_array" \
+            '{
+                title: $title,
+                body: $body,
+                labels: $labels
+            }')
+        
+        local create_response=$(github_api "repos/$TARGET_OWNER/$TARGET_REPO/issues" "POST" "$issue_data")
+        
+        if echo "$create_response" | jq -e '.number' > /dev/null; then
+            local new_issue_number=$(echo "$create_response" | jq -r '.number')
+            local new_issue_id=$(echo "$create_response" | jq -r '.node_id')
+            log_success "Issue #$new_issue_number を作成しました: $title"
+            created_issues+=("$new_issue_id")
+            ((copied_count++))
+        else
+            log_error "Issue \"$title\" の作成に失敗しました"
+            echo "$create_response" | jq .
+        fi
+    done < <(jq -c '.[]' issues.json)
+    
+    # 作成されたissueのIDを保存
+    printf '%s\n' "${created_issues[@]}" > created_issues_ids.txt
+    
+    log_success "$copied_count 個のissueをコピーしました"
+}
+
+# プロジェクトV2を作成（GraphQL使用）
+create_target_project() {
+    log_info "新しいユーザーレベルプロジェクトV2を作成しています..."
+    
+    # ユーザーIDを取得
+    local user_info=$(github_api "user")
+    local user_id=$(echo "$user_info" | jq -r '.node_id')
+    
+    if [ "$user_id" = "null" ] || [ -z "$user_id" ]; then
+        log_error "ユーザーIDの取得に失敗しました"
+        exit 1
+    fi
+    
+    # ユーザーレベルプロジェクト用のGraphQLミューテーション
+    local mutation='
+    mutation($ownerId: ID!, $title: String!) {
+        createProjectV2(input: {
+            ownerId: $ownerId,
+            title: $title
+        }) {
+            projectV2 {
+                id
+                title
+                url
+                number
+            }
+        }
+    }'
+    
+    local variables=$(jq -n \
+        --arg ownerId "$user_id" \
+        --arg title "$PROJECT_NAME (コピー)" \
+        '{
+            ownerId: $ownerId,
+            title: $title
+        }')
+    
+    local response=$(github_graphql "$mutation" "$variables")
+    
+    # エラーチェック
+    local errors=$(echo "$response" | jq '.errors // empty')
+    if [ -n "$errors" ] && [ "$errors" != "null" ]; then
+        log_error "プロジェクトV2の作成でエラーが発生しました:"
+        echo "$errors" | jq .
+        exit 1
+    fi
+    
+    local project_data=$(echo "$response" | jq '.data.createProjectV2.projectV2')
+    
+    if [ "$project_data" = "null" ] || [ -z "$project_data" ]; then
+        log_error "プロジェクトV2の作成に失敗しました"
+        exit 1
+    fi
+    
+    TARGET_PROJECT_ID=$(echo "$project_data" | jq -r '.id')
+    local project_url=$(echo "$project_data" | jq -r '.url')
+    local project_number=$(echo "$project_data" | jq -r '.number')
+    
+    log_success "プロジェクトV2を作成しました: $project_url (Number: $project_number)"
+}
+
+# プロジェクトV2にissueを追加
+create_project_columns() {
+    log_info "新しく作成したissueのみをプロジェクトV2に追加しています..."
+    
+    if [ ! -f "created_issues_ids.txt" ]; then
+        log_warning "created_issues_ids.txt が見つかりません。issueの追加をスキップします。"
+        return
+    fi
+    
+    local added_count=0
+    
+    # 作成されたissueのIDを使用してプロジェクトに追加
+    while IFS= read -r issue_id; do
+        if [ -n "$issue_id" ]; then
+            log_info "新しく作成されたissue (ID: $issue_id) をプロジェクトV2に追加中..."
+            
+            # プロジェクトV2にアイテムを追加するGraphQLミューテーション
+            local add_mutation='
+            mutation($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: {
+                    projectId: $projectId,
+                    contentId: $contentId
+                }) {
+                    item {
+                        id
+                    }
+                }
+            }'
+            
+            local add_variables=$(jq -n \
+                --arg projectId "$TARGET_PROJECT_ID" \
+                --arg contentId "$issue_id" \
+                '{
+                    projectId: $projectId,
+                    contentId: $contentId
+                }')
+            
+            local add_response=$(github_graphql "$add_mutation" "$add_variables")
+            
+            # エラーチェック
+            local add_errors=$(echo "$add_response" | jq '.errors // empty')
+            if [ -n "$add_errors" ] && [ "$add_errors" != "null" ]; then
+                log_warning "Issue (ID: $issue_id) のプロジェクトV2への追加に失敗しました:"
+                echo "$add_errors" | jq .
+            else
+                log_success "Issue (ID: $issue_id) をプロジェクトV2に追加しました"
+                ((added_count++))
+            fi
+        fi
+    done < created_issues_ids.txt
+    
+    log_success "$added_count 個の新しく作成されたissueをプロジェクトV2に追加しました"
+}
+
+# 一時ファイルをクリーンアップ
+cleanup() {
+    log_info "一時ファイルをクリーンアップしています..."
+    rm -f project_columns.json column_*_cards.json issue_urls.txt issues.json debug_*.json project_items.json items_debug.txt issues_debug.json created_issues_ids.txt
+    log_success "クリーンアップが完了しました"
+}
+
+# メイン処理
+main() {
+    log_info "GitHubプロジェクトコピーを開始します"
+    log_info "ソース: $SOURCE_PROJECT_URL"
+    
+    check_requirements
+    get_project_info
+    get_project_columns
+    get_related_issues
+    create_target_repo
+    copy_issues
+    create_target_project
+    create_project_columns
+    cleanup
+    
+    log_success "プロジェクトのコピーが完了しました!"
+    log_info "コピー先: https://github.com/$TARGET_OWNER/$TARGET_REPO/projects"
+}
+
+# スクリプト実行
+main "$@"
