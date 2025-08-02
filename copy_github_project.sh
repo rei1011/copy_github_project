@@ -110,7 +110,6 @@ get_project_info() {
             projectV2(number: $projectNumber) {
                 id
                 title
-                shortDescription
                 items(first: 100) {
                     nodes {
                         id
@@ -170,7 +169,6 @@ get_project_info() {
     fi
     
     PROJECT_NAME=$(echo "$project_data" | jq -r '.title')
-    PROJECT_BODY=$(echo "$project_data" | jq -r '.shortDescription // ""')
     
     # プロジェクトアイテム（Issue/PR）を保存
     echo "$project_data" | jq '.items.nodes' > project_items.json
