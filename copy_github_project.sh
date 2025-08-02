@@ -118,19 +118,12 @@ get_project_info() {
                             __typename
                             ... on Issue {
                                 id
-                                number
                                 title
                                 body
-                                url
                                 repository {
                                     name
                                     owner {
                                         login
-                                    }
-                                }
-                                labels(first: 10) {
-                                    nodes {
-                                        name
                                     }
                                 }
                             }
@@ -157,7 +150,7 @@ get_project_info() {
     local response=$(github_graphql "$query" "$variables")
     
     # レスポンスをデバッグ出力
-    echo "$response" | jq . > debug_projects_v2.json
+    echo "$response" | jq . > debug_projects.json
     
     # エラーチェック
     local errors=$(echo "$response" | jq '.errors // empty')
@@ -213,40 +206,25 @@ get_related_issues() {
         local content_type=$(echo "$item" | jq -r '.content.__typename // "unknown"')
         log_info "処理中のアイテムタイプ: $content_type"
         
-        # Issue タイプまたは __typename が存在しない場合で number フィールドがある場合
-        if [[ "$content_type" == "Issue" ]] || [[ "$content_type" == "unknown" && $(echo "$item" | jq -e '.content.number') ]]; then
+        # Issue タイプをチェック
+        if [[ "$content_type" == "Issue" ]]; then
             local issue_content=$(echo "$item" | jq '.content')
             local title=$(echo "$issue_content" | jq -r '.title // "タイトルなし"')
             local body=$(echo "$issue_content" | jq -r '.body // ""')
-            local url=$(echo "$issue_content" | jq -r '.url // ""')
             local repo_name=$(echo "$issue_content" | jq -r '.repository.name // "不明"')
             local repo_owner=$(echo "$issue_content" | jq -r '.repository.owner.login // "不明"')
-            local labels=$(echo "$issue_content" | jq -r '.labels.nodes // [] | map(.name) | join(",")')
-            local issue_number=$(echo "$issue_content" | jq -r '.number // 0')
             
-            log_info "Issue #$issue_number を処理中: $title ($repo_owner/$repo_name)"
-            
-            # ラベルの配列を作成
-            local labels_array="[]"
-            if [ -n "$labels" ] && [ "$labels" != "" ] && [ "$labels" != "null" ]; then
-                labels_array=$(echo "$labels" | sed 's/,/","/g' | sed 's/^/["/' | sed 's/$/"]/')
-            fi
+            log_info "Issue を処理中: $title ($repo_owner/$repo_name)"
             
             # issue情報をJSONとして構築
             local issue_json=$(jq -n \
                 --arg title "$title" \
                 --arg body "$body" \
-                --arg url "$url" \
-                --argjson number "$issue_number" \
-                --argjson labels "$labels_array" \
                 --arg repo_name "$repo_name" \
                 --arg repo_owner "$repo_owner" \
                 '{
                     title: $title,
                     body: $body,
-                    url: $url,
-                    number: $number,
-                    labels: ($labels | map({name: .})),
                     repository: {
                         name: $repo_name,
                         owner: {login: $repo_owner}
@@ -285,7 +263,6 @@ copy_issues() {
     while IFS= read -r issue; do
         local title=$(echo "$issue" | jq -r '.title')
         local body=$(echo "$issue" | jq -r '.body // ""')
-        local labels=$(echo "$issue" | jq -r '.labels // [] | map(.name) | join(",")')
         local repo_owner=$(echo "$issue" | jq -r '.repository.owner.login // ""')
         local repo_name=$(echo "$issue" | jq -r '.repository.name // ""')
         
@@ -297,23 +274,15 @@ copy_issues() {
         
         log_info "Issue \"$title\" を $repo_owner/$repo_name にコピー中..."
         
-        # ラベルの配列を作成
-        local labels_array="[]"
-        if [ -n "$labels" ] && [ "$labels" != "" ]; then
-            labels_array=$(echo "$labels" | sed 's/,/","/g' | sed 's/^/["/' | sed 's/$/"]/')
-        fi
-        
         # 本文に元のプロジェクトへの参照を追加
         local new_body="$body"
         
         local issue_data=$(jq -n \
             --arg title "$title" \
             --arg body "$new_body" \
-            --argjson labels "$labels_array" \
             '{
                 title: $title,
-                body: $body,
-                labels: $labels
+                body: $body
             }')
         
         # 元のリポジトリにissueを作成
