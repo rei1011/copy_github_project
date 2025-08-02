@@ -188,16 +188,6 @@ get_related_issues() {
         exit 1
     fi
     
-    # デバッグ: プロジェクトアイテムの詳細を確認
-    log_info "プロジェクトアイテムの詳細をデバッグ中..."
-    local total_items=$(jq '. | length' project_items.json)
-    log_info "取得したアイテム総数: $total_items"
-    
-    # 各アイテムのタイプを確認
-    jq -r '.[] | "アイテムタイプ: \(.content.__typename // "null"), ID: \(.id)"' project_items.json > items_debug.txt
-    log_info "アイテムタイプ詳細:"
-    cat items_debug.txt
-    
     # プロジェクトアイテムからissueを抽出
     echo "[]" > issues.json
     
