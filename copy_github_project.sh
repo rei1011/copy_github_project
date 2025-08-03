@@ -313,8 +313,6 @@ create_target_project() {
             projectV2 {
                 id
                 title
-                url
-                number
             }
         }
     }'
@@ -345,10 +343,9 @@ create_target_project() {
     fi
     
     TARGET_PROJECT_ID=$(echo "$project_data" | jq -r '.id')
-    local project_url=$(echo "$project_data" | jq -r '.url')
-    local project_number=$(echo "$project_data" | jq -r '.number')
+    local project_title=$(echo "$project_data" | jq -r '.title')
     
-    log_success "プロジェクトを作成しました: $project_url (Number: $project_number)"
+    log_success "プロジェクトを作成しました: $project_title"
 }
 
 # プロジェクトにissueを追加
