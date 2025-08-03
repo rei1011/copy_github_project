@@ -239,9 +239,9 @@ copy_issues() {
         return
     fi
 
-    local created_issues=()
     
     # jqの出力を配列に読み込む
+    local created_issues=()
     while IFS= read -r issue; do
         local title=$(echo "$issue" | jq -r '.title')
         local body=$(echo "$issue" | jq -r '.body // ""')
