@@ -104,6 +104,7 @@ get_project_info() {
     log_info "プロジェクト情報を取得しています..."
     
     # GraphQLクエリでユーザーまたはOrganizationのプロジェクトを取得
+    # 流石にissueが100件を超えることはないはずなので、first: 100で十分
     local query='
     query($login: String!, $projectNumber: Int!) {
         organization(login: $login) {
@@ -170,7 +171,7 @@ get_project_info() {
     
     PROJECT_NAME=$(echo "$project_data" | jq -r '.title')
     
-    # プロジェクトアイテム（Issue/PR）を保存
+    # issueを保存
     echo "$project_data" | jq '.items.nodes' > project_items.json
     
     log_success "プロジェクト情報を取得しました: $PROJECT_NAME"
@@ -188,11 +189,8 @@ get_related_issues() {
     
     # プロジェクトアイテムからissueを抽出
     echo "[]" > issues.json
-    
-    # より包括的な検索（__typename がない場合も考慮）
     jq -c '.[] | select(.content != null)' project_items.json | while read -r item; do
         local content_type=$(echo "$item" | jq -r '.content.__typename // "unknown"')
-        log_info "処理中のアイテムタイプ: $content_type"
         
         # Issue タイプをチェック
         if [[ "$content_type" == "Issue" ]]; then
