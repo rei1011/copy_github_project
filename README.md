@@ -24,9 +24,7 @@
    - [GitHub Personal Access Token](https://github.com/settings/tokens)を作成
    - **必要な権限（重要）**: 
      - `repo` - リポジトリへのフルアクセス
-     - `read:project` - プロジェクトV2の読み取り
-     - `write:project` - プロジェクトV2の作成と編集
-     - `read:user` - ユーザー情報の読み取り
+     - `project` - プロジェクトへのフルアクセス
    
    **トークン作成手順**:
    1. [GitHub設定 > Personal access tokens](https://github.com/settings/tokens)にアクセス
@@ -45,8 +43,6 @@
 export GITHUB_TOKEN="your_github_token_here"
 ```
 
-**注意**: 以前のバージョンでは`TARGET_OWNER`と`TARGET_REPO`の設定が必要でしたが、現在のバージョンでは不要です。issueは元のリポジトリに作成され、プロジェクトは元のorganizationに作成されます。
-
 ### 2. スクリプトの実行
 
 ```bash
@@ -59,7 +55,6 @@ export GITHUB_TOKEN="your_github_token_here"
 
 ```bash
 # コピー元のプロジェクト設定
-SOURCE_PROJECT_URL="https://github.com/users/rei1011/projects/1"
 SOURCE_OWNER="rei1011"
 SOURCE_PROJECT_ID="1"
 ```
