@@ -129,11 +129,6 @@ get_project_info() {
                                     }
                                 }
                             }
-                            ... on DraftIssue {
-                                id
-                                title
-                                body
-                            }
                         }
                     }
                 }
