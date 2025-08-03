@@ -231,9 +231,9 @@ get_related_issues() {
 }
 
 
-# issueをコピー（元のリポジトリに作成）
+# issueをコピー
 copy_issues() {
-    log_info "issueを元のリポジトリにコピーしています..."
+    log_info "issueをリポジトリにコピーしています..."
     
     local issue_count=$(jq '. | length' issues.json)
     
@@ -241,8 +241,7 @@ copy_issues() {
         log_warning "コピーするissueがありません"
         return
     fi
-    
-    local copied_count=0
+
     local created_issues=()
     
     # jqの出力を配列に読み込む
@@ -279,7 +278,6 @@ copy_issues() {
             local new_issue_id=$(echo "$create_response" | jq -r '.node_id')
             log_success "Issue #$new_issue_number を $repo_owner/$repo_name に作成しました: $title"
             created_issues+=("$new_issue_id")
-            ((copied_count++))
         else
             log_error "Issue \"$title\" の $repo_owner/$repo_name への作成に失敗しました"
             echo "$create_response" | jq .
@@ -289,7 +287,7 @@ copy_issues() {
     # 作成されたissueのIDを保存
     printf '%s\n' "${created_issues[@]}" > created_issues_ids.txt
     
-    log_success "$copied_count 個のissueを元のリポジトリにコピーしました"
+    log_success "issueを元のリポジトリにコピーしました"
 }
 
 # 新しいプロジェクトを作成（GraphQL使用）
@@ -361,11 +359,10 @@ create_project_columns() {
         log_warning "created_issues_ids.txt が見つかりません。issueの追加をスキップします。"
         return
     fi
-    
-    local added_count=0
+
     
     # 作成されたissueのIDを使用してプロジェクトに追加
-    while IFS= read -r issue_id; do
+    cat created_issues_ids.txt | while IFS= read -r issue_id; do
         if [ -n "$issue_id" ]; then
             log_info "新しく作成されたissue (ID: $issue_id) をプロジェクトに追加中..."
             
@@ -399,12 +396,11 @@ create_project_columns() {
                 echo "$add_errors" | jq .
             else
                 log_success "Issue (ID: $issue_id) をプロジェクトに追加しました"
-                ((added_count++))
             fi
         fi
-    done < created_issues_ids.txt
+    done
     
-    log_success "$added_count 個の新しく作成されたissueをプロジェクトに追加しました"
+    log_success "新しく作成されたissueをプロジェクトに追加しました"
 }
 
 # 一時ファイルをクリーンアップ
