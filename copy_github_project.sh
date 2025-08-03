@@ -5,11 +5,11 @@
 
 set -e
 
-# 設定変数
+# コピー元のプロジェクトに関する情報
 SOURCE_OWNER="copy-project"
 SOURCE_PROJECT_ID="1"
 
-# 色付きの出力用
+# ログ出力の色設定
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -55,7 +55,7 @@ check_requirements() {
 }
 
 # GraphQL APIを呼び出すための関数
-# Projects v2 はGraphQLでのみ操作可能なので、GraphQLを使用
+# Projects v2 はGraphQLでのみ操作可能なため
 github_graphql() {
     local query="$1"
     local variables="$2"
@@ -105,7 +105,7 @@ github_api() {
 get_project_info() {
     log_info "プロジェクト情報を取得しています..."
     
-    # GraphQLクエリでユーザーまたはOrganizationのプロジェクトを取得
+    # プロジェクトとそれに紐づくissueの情報を取得
     # 流石にissueが100件を超えることはないはずなので、first: 100で十分
     local query='
     query($login: String!, $projectNumber: Int!) {
@@ -146,7 +146,7 @@ get_project_info() {
     
     local response=$(github_graphql "$query" "$variables")
     
-    # レスポンスをデバッグ出力
+    # デバッグ用の情報を出力
     echo "$response" | jq . > debug_projects.json
     
     # エラーチェック
@@ -177,7 +177,7 @@ get_project_info() {
 
 # 関連するissueを取得
 get_related_issues() {
-    log_info "issueを取得しています..."
+    log_info "Issueを取得しています..."
     
     if [ ! -f "project_items.json" ]; then
         log_error "project_items.json ファイルが見つかりません"
@@ -347,7 +347,7 @@ create_target_project() {
 
 # プロジェクトにissueを追加
 create_project_columns() {
-    log_info "新しく作成したissueのみをプロジェクトに追加しています..."
+    log_info "新しく作成したissueをプロジェクトに追加しています..."
     
     if [ ! -f "created_issues_ids.txt" ]; then
         log_warning "created_issues_ids.txt が見つかりません。issueの追加をスキップします。"
@@ -358,7 +358,7 @@ create_project_columns() {
     # 作成されたissueのIDを使用してプロジェクトに追加
     cat created_issues_ids.txt | while IFS= read -r issue_id; do
         if [ -n "$issue_id" ]; then
-            log_info "新しく作成されたissue (ID: $issue_id) をプロジェクトに追加中..."
+            log_info "新しく作成されたIssue (ID: $issue_id) をプロジェクトに追加中..."
             
             # プロジェクトにアイテムを追加するGraphQLミューテーション
             local add_mutation='
@@ -394,12 +394,12 @@ create_project_columns() {
         fi
     done
     
-    log_success "新しく作成されたissueをプロジェクトに追加しました"
+    log_success "新しく作成されたIssueをプロジェクトに追加しました"
 }
 
-# 一時ファイルをクリーンアップ
+# デバッグ用のtempファイルを削除
 cleanup() {
-    log_info "一時ファイルをクリーンアップしています..."
+    log_info "デバッグ用のtempファイルを削除しています..."
     rm -f project_columns.json column_*_cards.json issue_urls.txt issues.json debug_*.json project_items.json items_debug.txt issues_debug.json created_issues_ids.txt
     log_success "クリーンアップが完了しました"
 }
