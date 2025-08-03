@@ -54,28 +54,8 @@ check_requirements() {
     fi
 }
 
-# GitHub APIを呼び出すための関数
-github_api() {
-    local endpoint="$1"
-    local method="${2:-GET}"
-    local data="${3:-}"
-    
-    local curl_args=(
-        -s
-        -H "Authorization: token $GITHUB_TOKEN"
-        -H "Accept: application/vnd.github+json"
-        -H "X-GitHub-Api-Version: 2022-11-28"
-        -X "$method"
-    )
-    
-    if [ -n "$data" ]; then
-        curl_args+=(-H "Content-Type: application/json" -d "$data")
-    fi
-    
-    curl "${curl_args[@]}" "https://api.github.com/$endpoint"
-}
-
 # GraphQL APIを呼び出すための関数
+# Projects v2 はGraphQLでのみ操作可能なので、GraphQLを使用
 github_graphql() {
     local query="$1"
     local variables="$2"
@@ -97,6 +77,28 @@ github_graphql() {
         -X POST \
         -d "$data" \
         "https://api.github.com/graphql"
+}
+
+# GitHub APIを呼び出すための関数
+# Projects v2以外の操作はREST APIの方がシンプルなのでこちらを使用
+github_api() {
+    local endpoint="$1"
+    local method="${2:-GET}"
+    local data="${3:-}"
+    
+    local curl_args=(
+        -s
+        -H "Authorization: token $GITHUB_TOKEN"
+        -H "Accept: application/vnd.github+json"
+        -H "X-GitHub-Api-Version: 2022-11-28"
+        -X "$method"
+    )
+    
+    if [ -n "$data" ]; then
+        curl_args+=(-H "Content-Type: application/json" -d "$data")
+    fi
+    
+    curl "${curl_args[@]}" "https://api.github.com/$endpoint"
 }
 
 # プロジェクト情報を取得
